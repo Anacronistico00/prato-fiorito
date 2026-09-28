@@ -9,10 +9,11 @@ import type { Skin } from '../lib/settings';
 
 const livesLeft = (p: PublicPlayer) => (p.board ? Math.max(0, p.board.lives - p.board.hits) : 0);
 
-function statusLabel(p: PublicPlayer): string {
+function statusLabel(p: PublicPlayer, ended = false): string {
   if (!p.board) return 'spettatore';
   if (p.board.status === 'won') return '🌼 campo pulito';
   if (p.board.status === 'lost') return '💀 eliminato';
+  if (ended) return 'ancora in gara';
   return p.connected ? 'in gioco' : 'offline';
 }
 
@@ -101,7 +102,7 @@ export function RaceArea({ room, me, now, skin }: {
                     <td>
                       {p.board?.status === 'won' && p.board.startedAt && p.board.endedAt
                         ? `pulito in ${displaySeconds(p.board.startedAt, p.board.endedAt)} s`
-                        : statusLabel(p)}
+                        : statusLabel(p, true)}
                     </td>
                   </tr>
                 ))}
@@ -124,7 +125,7 @@ export function RaceArea({ room, me, now, skin }: {
                 </div>
                 <div className="opp-sub">
                   <Lives total={p.board!.lives} left={livesLeft(p)} size="sm" />
-                  <span className="muted small">{statusLabel(p)}</span>
+                  <span className="muted small">{statusLabel(p, room.phase === 'ended')}</span>
                 </div>
                 <MiniBoard board={p.board!} />
               </div>

@@ -218,6 +218,7 @@ class RoomClient {
 
   configure(settings: RoomSettings) { this.send({ t: 'configure', settings }); }
   start() { this.send({ t: 'start' }); }
+  endRace() { this.send({ t: 'end' }); }
   reveal(i: number) { this.send({ t: 'reveal', i }); }
   chord(i: number) { this.send({ t: 'chord', i }); }
   flag(i: number) { this.send({ t: 'flag', i }); }

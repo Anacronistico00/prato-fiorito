@@ -92,6 +92,7 @@ function parse(data: RawData): ClientMessage | null {
       return { t: 'chat', text: str(msg.text, 500) };
     case 'leave':
     case 'start':
+    case 'end':
       return { t: msg.t };
     default:
       return null;
@@ -179,6 +180,8 @@ function handle(c: Conn, msg: ClientMessage) {
       return room.configure(player.id, msg.settings);
     case 'start':
       return room.start(player.id);
+    case 'end':
+      return room.endRace(player.id);
     case 'reveal':
     case 'chord':
       return room.reveal(player.id, msg.i, msg.t);

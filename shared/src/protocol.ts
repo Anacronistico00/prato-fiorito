@@ -125,6 +125,7 @@ export type ClientMessage =
   | { t: 'leave' }
   | { t: 'configure'; settings: RoomSettings }
   | { t: 'start' }
+  | { t: 'end' }
   | { t: 'reveal'; i: number }
   | { t: 'chord'; i: number }
   | { t: 'flag'; i: number }

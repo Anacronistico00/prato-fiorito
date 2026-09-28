@@ -340,3 +340,4 @@ input:focus, select:focus, .btn:focus-visible { outline: 2px solid var(--accent)
 .next-round { width: 100%; }
 .end-controls { max-width: 560px; width: 100%; align-self: center; text-align: center; }
 .segmented button strong { font-size: .95rem; overflow-wrap: anywhere; }
+.btn.small { padding: .3rem .7rem; font-size: .85rem; }

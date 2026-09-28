@@ -268,6 +268,15 @@ function StatusBar({ room, me, turnPlayerName, turnLeft, byId }: {
       <div className="status-bar turn">
         <span><strong>⚔️ Sfida in corso</strong> · stesse mine per tutti, ognuno sul suo campo</span>
         <span className="muted small">{inGame} ancora in gioco</span>
+        {room.hostId === me && (
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => confirm('Terminare la sfida adesso? Vince chi ha più punti in questo momento.') && roomClient.endRace()}
+          >
+            Termina sfida
+          </button>
+        )}
       </div>
     );
   }

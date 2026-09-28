@@ -274,13 +274,38 @@ export class Room {
   }
 
   /** La sfida finisce quando nessuno sta più giocando (campo pulito, eliminato o disconnesso). */
+  /**
+   * La sfida finisce quando:
+   * - qualcuno ripulisce il campo (con le stesse mine ha già il massimo dei punti: nessuno può superarlo);
+   * - nessuno sta più giocando (eliminati o disconnessi);
+   * - resta un solo giocatore in gara ed è già primo: continuare non cambierebbe il vincitore.
+   */
   private checkRaceEnd() {
     if (!this.isRace || this.phase !== 'playing') return;
-    const racing = this.players.some((p) => p.game && p.connected && !isOver(p.game));
-    if (racing) return;
+    const racers = this.players.filter((p) => p.game && p.connected && !isOver(p.game));
+    if (this.players.some((p) => p.game?.status === 'won') || racers.length === 0) return this.finishRace();
+    if (racers.length === 1) {
+      const [first, second] = rankPlayers(this.view().players.filter((p) => p.board));
+      if (second && first.id === racers[0].id && first.score > second.score) this.finishRace();
+    }
+  }
+
+  /** Fine sfida anticipata, decisa dall'host (es. qualcuno è rimasto fermo). */
+  endRace(playerId: string): void {
+    this.requireHost(playerId);
+    if (!this.isRace || this.phase !== 'playing') throw new RoomError('BAD_PHASE', 'Nessuna sfida in corso.');
+    this.systemMessage('L\'host ha terminato la sfida.');
+    this.finishRace();
+    this.broadcastState();
+  }
+
+  private finishRace() {
     this.phase = 'ended';
+    const now = Date.now();
+    // Chi era ancora in gara si ferma qui (il suo timer non deve continuare a correre).
+    for (const p of this.players) if (p.game && !isOver(p.game)) p.game.endedAt = now;
     const [winner] = rankPlayers(this.view().players.filter((p) => p.board));
-    this.systemMessage(winner ? `🏆 ${winner.name} vince la sfida con ${winner.score} punti!` : 'Sfida terminata.');
+    this.systemMessage(winner ? `🏆 ${winner.name} vince la sfida con ${winner.score} ${winner.score === 1 ? "punto" : "punti"}!` : 'Sfida terminata.');
   }
 
   private endGame(by: Player) {
