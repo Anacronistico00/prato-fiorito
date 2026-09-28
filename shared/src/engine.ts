@@ -39,13 +39,17 @@ export interface Game {
   revealed: number;
   flags: number;
   exploded: number;
+  /** Vite a disposizione: la partita è persa quando `hits` arriva a `lives`. */
+  lives: number;
+  /** Mine già fatte esplodere (restano scoperte sul campo). */
+  hits: number;
   startedAt: number | null;
   endedAt: number | null;
 }
 
 export type Rng = () => number;
 
-export function createGame(cfg: BoardConfig): Game {
+export function createGame(cfg: BoardConfig, lives = 1): Game {
   const size = cfg.width * cfg.height;
   return {
     width: cfg.width,
@@ -59,6 +63,8 @@ export function createGame(cfg: BoardConfig): Game {
     revealed: 0,
     flags: 0,
     exploded: -1,
+    lives: Math.max(1, lives),
+    hits: 0,
     startedAt: null,
     endedAt: null,
   };
@@ -116,6 +122,27 @@ export function placeMines(g: Game, safe: number, rng: Rng = Math.random): void 
   g.minesPlaced = true;
 }
 
+/** Nuova partita con la stessa disposizione di mine di `src` (per la modalità sfida). */
+export function cloneLayout(src: Game, lives = 1): Game {
+  const g = createGame({ width: src.width, height: src.height, mines: src.mines }, lives);
+  g.mine.set(src.mine);
+  g.adjacent.set(src.adjacent);
+  g.minesPlaced = src.minesPlaced;
+  return g;
+}
+
+/** Numero di vite rimaste. */
+export function livesLeft(g: Game): number {
+  return Math.max(0, g.lives - g.hits);
+}
+
+/** Una mina scoperta: costa una vita; la partita è persa solo se le vite finiscono. */
+function explode(g: Game, i: number) {
+  g.state[i] = Cell.REVEALED;
+  g.exploded = i;
+  g.hits++;
+}
+
 function start(g: Game, i: number, now: number, rng: Rng) {
   if (!g.minesPlaced) placeMines(g, i, rng);
   if (g.status === 'ready') {
@@ -152,10 +179,11 @@ function checkWin(g: Game, now: number) {
   g.status = 'won';
   g.endedAt = now;
   // Come nell'originale: a vittoria tutte le mine vengono segnate.
+  // Le mine già esplose restano visibili come tali.
   for (let i = 0; i < g.mine.length; i++) {
-    if (g.mine[i]) g.state[i] = Cell.FLAGGED;
+    if (g.mine[i] && g.state[i] !== Cell.REVEALED) g.state[i] = Cell.FLAGGED;
   }
-  g.flags = g.mines;
+  g.flags = g.mines - g.hits;
 }
 
 /** Click sinistro su una cella coperta. Ritorna true se lo stato è cambiato. */
@@ -167,9 +195,8 @@ export function reveal(g: Game, i: number, now = Date.now(), rng: Rng = Math.ran
   start(g, i, now, rng);
 
   if (g.mine[i]) {
-    g.state[i] = Cell.REVEALED;
-    g.exploded = i;
-    lose(g, now);
+    explode(g, i);
+    if (g.hits >= g.lives) lose(g, now);
     return true;
   }
   flood(g, i);
@@ -186,25 +213,20 @@ export function chord(g: Game, i: number, now = Date.now()): boolean {
   if (g.state[i] !== Cell.REVEALED || g.adjacent[i] === 0 || g.mine[i]) return false;
 
   const nbs = neighbors(g, i);
-  const flagged = nbs.filter((n) => g.state[n] === Cell.FLAGGED).length;
+  // Le mine già esplose valgono come bandierine: sono mine note.
+  const flagged = nbs.filter((n) => g.state[n] === Cell.FLAGGED || (g.state[n] === Cell.REVEALED && g.mine[n])).length;
   if (flagged !== g.adjacent[i]) return false;
 
   let changed = false;
-  let hit = false;
   for (const n of nbs) {
     const s = g.state[n];
     if (s !== Cell.HIDDEN && s !== Cell.QUESTION) continue;
     changed = true;
-    if (g.mine[n]) {
-      g.state[n] = Cell.REVEALED;
-      if (g.exploded < 0) g.exploded = n;
-      hit = true;
-    } else {
-      flood(g, n);
-    }
+    if (g.mine[n]) explode(g, n);
+    else flood(g, n);
   }
   if (!changed) return false;
-  if (hit) lose(g, now);
+  if (g.hits >= g.lives) lose(g, now);
   else checkWin(g, now);
   return true;
 }
@@ -229,10 +251,14 @@ export function toggleMark(g: Game, i: number, questionMarks = true): boolean {
   }
 }
 
-/** Vista pubblica della griglia: non rivela mai le mine finché la partita non è persa. */
-export function toView(g: Game): number[] {
+/**
+ * Vista pubblica della griglia: non rivela mai le mine finché la partita non è persa.
+ * Con `revealMines = false` anche una partita persa non mostra le mine nascoste
+ * (serve in sfida: tutti hanno la stessa disposizione finché la gara è in corso).
+ */
+export function toView(g: Game, revealMines = true): number[] {
   const out = new Array<number>(g.state.length);
-  const lost = g.status === 'lost';
+  const lost = g.status === 'lost' && revealMines;
   for (let i = 0; i < g.state.length; i++) {
     const s = g.state[i];
     const m = g.mine[i] === 1;

@@ -26,12 +26,13 @@ La logica sta in `shared/src/engine.ts`: il client la usa per il single player, 
 - Record per difficoltà (localStorage), scorciatoie `F2`/`N` (nuova partita) e `F` (bandierina)
 - Touch: tap = scopri, pressione lunga = bandierina, pulsante ⛏️/🚩 per invertirli
 
-**Multiplayer cooperativo**
-- Codice partita univoco di 6 caratteri (niente 0/O/1/I/L ambigui) e link d'invito `/partita/CODICE`
-- Fino a 8 giocatori, turni a rotazione, timer del turno opzionale (10/20/30/60 s)
-- Scoprire una cella consuma il turno; le bandierine sono libere per tutti. Una mina fa perdere tutti.
+**Multiplayer** (codice partita di 6 caratteri, niente 0/O/1/I/L ambigui, e link d'invito `/partita/CODICE`, fino a 8 giocatori)
+- **Cooperativa**: un solo campo, a turni, timer del turno opzionale (10/20/30/60 s). Scoprire consuma il turno, le bandierine sono libere per tutti.
+  Vite della squadra da 1 a 5 (le sceglie l'host): ogni mina ne costa una, a zero si perde. Punti = celle scoperte; quelle del primo click si dividono in parti uguali.
+- **Sfida**: un campo a testa con le stesse mine e la stessa apertura iniziale (che non dà punti), tutti in contemporanea. Da 1 a 5 vite a testa, a zero si è eliminati.
+  Si vedono i campi degli avversari in miniatura in tempo reale; le mine restano nascoste su tutti i campi finché la sfida non finisce. Vince chi fa più punti (a parità, chi ha ripulito il campo prima).
 - Riconnessione automatica (anche ricaricando la pagina); se chi è di turno esce, il turno passa
-- Passaggio dell'host se l'host esce, chat, statistiche per giocatore, nuovo round con chi inizia a rotazione
+- Passaggio dell'host se l'host esce, chat, nuovo round con chi inizia a rotazione
 - Server: validazione di ogni input, rate limit, heartbeat, pulizia delle stanze inattive, controllo origin
 
 ## Sviluppo locale
@@ -71,10 +72,10 @@ Messaggi JSON `{ t: ... }`, tipizzati in `shared/src/protocol.ts`.
 
 | Client → Server | |
 |---|---|
-| `create { name, config, turnSeconds }` | crea partita, diventi host |
+| `create { name, settings: { config, mode, lives, turnSeconds } }` | crea partita, diventi host |
 | `join { code, name }` / `resume { code, playerId, token }` | entra / rientra |
 | `configure`, `start` | solo host |
-| `reveal { i }`, `chord { i }` | solo nel tuo turno |
+| `reveal { i }`, `chord { i }` | coop: solo nel tuo turno · sfida: sul tuo campo |
 | `flag { i }`, `chat { text }`, `leave` | sempre |
 
 | Server → Client | |

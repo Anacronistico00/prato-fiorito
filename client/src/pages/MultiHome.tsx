@@ -1,22 +1,21 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  CODE_LENGTH, DIFFICULTIES, MAX_NAME_LENGTH, TURN_OPTIONS, isValidCode, normalizeCode,
-  type BoardConfig,
+  CODE_LENGTH, DEFAULT_SETTINGS, MAX_NAME_LENGTH, isValidCode, normalizeCode, normalizeSettings,
+  type RoomSettings,
 } from '@prato/shared';
-import { ConfigPicker } from '../components/ConfigPicker';
+import { RoomSettingsForm } from '../components/RoomSettingsForm';
 import { useServerStatus } from '../hooks/useServerStatus';
 import { JoinError, roomClient } from '../lib/roomClient';
 import { usePlayerName } from '../lib/settings';
-
-export const turnLabel = (s: number) => (s === 0 ? 'Illimitato' : `${s} s`);
+import { useStored } from '../lib/storage';
 
 export function MultiHome() {
   const navigate = useNavigate();
   const status = useServerStatus();
   const [name, setName] = usePlayerName();
-  const [config, setConfig] = useState<BoardConfig>(DIFFICULTIES.beginner);
-  const [turnSeconds, setTurnSeconds] = useState(20);
+  const [stored, setSettings] = useStored<RoomSettings>('pf.roomSettings', DEFAULT_SETTINGS);
+  const settings = normalizeSettings(stored);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<'create' | 'join' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,24 +52,16 @@ export function MultiHome() {
         </label>
       </section>
 
-      <div className="two-cols">
+      <div className="create-join">
         <section className="card">
           <h2>Crea una partita</h2>
-          <p className="muted">Ricevi un codice da condividere. Si gioca in cooperativa, un turno a testa.</p>
-          <ConfigPicker value={config} onChange={setConfig} />
-          <label className="field">
-            <span>Tempo per turno</span>
-            <select value={turnSeconds} onChange={(e) => setTurnSeconds(Number(e.target.value))}>
-              {TURN_OPTIONS.map((s) => (
-                <option key={s} value={s}>{turnLabel(s)}</option>
-              ))}
-            </select>
-          </label>
+          <p className="muted">Ricevi un codice da condividere. Potrai cambiare le impostazioni anche dopo, nella stanza.</p>
+          <RoomSettingsForm value={settings} onChange={setSettings} />
           <button
             type="button"
             className="btn primary big"
             disabled={!nameOk || busy != null}
-            onClick={() => run('create', () => roomClient.create(name.trim(), config, turnSeconds))}
+            onClick={() => run('create', () => roomClient.create(name.trim(), settings))}
           >
             {busy === 'create' ? 'Creazione…' : 'Crea partita'}
           </button>

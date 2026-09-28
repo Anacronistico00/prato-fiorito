@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type {
-  BoardConfig, ChatMessage, ClientMessage, ErrorCode, RoomView, ServerMessage,
+  ChatMessage, ClientMessage, ErrorCode, RoomSettings, RoomView, ServerMessage,
 } from '@prato/shared';
 import { SERVER_WS_URL } from './settings';
 import { load, save } from './storage';
@@ -183,9 +183,9 @@ class RoomClient {
 
   // ───────────── API ─────────────
 
-  create(name: string, config: BoardConfig, turnSeconds: number) {
+  create(name: string, settings: RoomSettings) {
     this.reset();
-    return this.awaitJoin({ t: 'create', name, config, turnSeconds });
+    return this.awaitJoin({ t: 'create', name, settings });
   }
 
   join(code: string, name: string) {
@@ -216,7 +216,7 @@ class RoomClient {
     this.set({ error: null });
   }
 
-  configure(config: BoardConfig, turnSeconds: number) { this.send({ t: 'configure', config, turnSeconds }); }
+  configure(settings: RoomSettings) { this.send({ t: 'configure', settings }); }
   start() { this.send({ t: 'start' }); }
   reveal(i: number) { this.send({ t: 'reveal', i }); }
   chord(i: number) { this.send({ t: 'chord', i }); }

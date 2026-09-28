@@ -2,9 +2,9 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 import {
   MAX_CHAT_LENGTH, MAX_PLAYERS, PLAYER_COLORS,
-  chord, createGame, isOver, reveal, toView, toggleMark,
-  type BoardConfig, type ChatMessage, type ErrorCode, type Game, type LastAction,
-  type RoomPhase, type RoomView, type ServerMessage,
+  chord, cloneLayout, createGame, isOver, livesLeft, placeMines, rankPlayers, reveal, toView, toggleMark,
+  type BoardView, type ChatMessage, type ErrorCode, type Game, type LastAction,
+  type RoomPhase, type RoomSettings, type RoomView, type ServerMessage,
 } from '@prato/shared';
 
 /** Quanto resta in lista un giocatore disconnesso prima di essere rimosso. */
@@ -23,7 +23,10 @@ export interface Player {
   name: string;
   color: string;
   connected: boolean;
-  revealed: number;
+  score: number;
+  /** Solo sfida: il campo personale e le celle già aperte all'avvio (non danno punti). */
+  game: Game | null;
+  baseline: number;
   socket: WebSocket | null;
   removeTimer: NodeJS.Timeout | null;
 }
@@ -50,11 +53,14 @@ export class Room {
 
   constructor(
     readonly code: string,
-    public config: BoardConfig,
-    public turnSeconds: number,
+    public settings: RoomSettings,
     private hooks: RoomHooks,
   ) {
-    this.game = createGame(config);
+    this.game = createGame(settings.config, settings.lives);
+  }
+
+  private get isRace() {
+    return this.settings.mode === 'race';
   }
 
   // ───────────────────────── giocatori ─────────────────────────
@@ -70,7 +76,9 @@ export class Room {
       name: this.uniqueName(rawName),
       color: PLAYER_COLORS.find((c) => !used.has(c)) ?? PLAYER_COLORS[0],
       connected: true,
-      revealed: 0,
+      score: 0,
+      game: null,
+      baseline: 0,
       socket,
       removeTimer: null,
     };
@@ -112,6 +120,7 @@ export class Room {
     this.systemMessage(`${player.name} si è disconnesso`);
     this.transferHostIfNeeded();
     if (this.turnPlayerId === player.id) this.advanceTurn(this.indexOf(player.id));
+    this.checkRaceEnd();
     player.removeTimer = setTimeout(() => this.remove(player.id, false), PLAYER_GRACE_MS);
     if (!this.players.some((p) => p.connected)) this.hooks.onIdleChange(this, true);
     this.broadcastState();
@@ -131,32 +140,54 @@ export class Room {
     }
     this.transferHostIfNeeded();
     if (this.turnPlayerId === player.id) this.advanceTurn(idx - 1);
+    this.checkRaceEnd();
     if (!this.players.some((p) => p.connected)) this.hooks.onIdleChange(this, true);
     this.broadcastState();
   }
 
   // ───────────────────────── impostazioni e avvio ─────────────────────────
 
-  configure(playerId: string, config: BoardConfig, turnSeconds: number): void {
+  configure(playerId: string, settings: RoomSettings): void {
     this.requireHost(playerId);
     if (this.phase === 'playing') throw new RoomError('BAD_PHASE', 'Non puoi cambiare impostazioni durante la partita.');
-    this.config = config;
-    this.turnSeconds = turnSeconds;
-    if (this.phase === 'lobby') this.game = createGame(config);
+    this.settings = settings;
+    if (this.phase === 'lobby') this.game = createGame(settings.config, settings.lives);
     this.broadcastState();
   }
 
   start(playerId: string): void {
     this.requireHost(playerId);
     if (this.phase === 'playing') throw new RoomError('BAD_PHASE', 'La partita è già in corso.');
-    this.game = createGame(this.config);
+    const { config, lives } = this.settings;
     this.phase = 'playing';
     this.round++;
     this.lastAction = null;
-    for (const p of this.players) p.revealed = 0;
-    // A ogni round inizia un giocatore diverso.
-    this.advanceTurn(((this.round - 1) % this.players.length) - 1);
-    this.systemMessage(`Round ${this.round} iniziato!`);
+    for (const p of this.players) {
+      p.score = 0;
+      p.game = null;
+      p.baseline = 0;
+    }
+
+    if (this.isRace) {
+      // Stessa disposizione per tutti, con la stessa apertura iniziale già scoperta:
+      // nessuno parte avvantaggiato e l'apertura non assegna punti.
+      this.game = createGame(config, lives);
+      const opening = Math.floor(Math.random() * config.width * config.height);
+      placeMines(this.game, opening);
+      const now = Date.now();
+      for (const p of this.players) {
+        p.game = cloneLayout(this.game, lives);
+        reveal(p.game, opening, now);
+        p.baseline = p.game.revealed;
+      }
+      this.setTurn(null);
+      this.systemMessage(`Round ${this.round}: sfida iniziata! Stesse mine per tutti, ${lives} ${lives === 1 ? 'vita' : 'vite'} a testa.`);
+    } else {
+      this.game = createGame(config, lives);
+      // A ogni round inizia un giocatore diverso.
+      this.advanceTurn(((this.round - 1) % this.players.length) - 1);
+      this.systemMessage(`Round ${this.round} iniziato! Vite della squadra: ${lives}.`);
+    }
     this.broadcastState();
   }
 
@@ -164,26 +195,75 @@ export class Room {
 
   reveal(playerId: string, index: number, kind: 'reveal' | 'chord'): void {
     this.requirePlaying();
+    if (this.isRace) return this.raceReveal(playerId, index, kind);
     if (this.turnPlayerId !== playerId) throw new RoomError('NOT_YOUR_TURN', 'Non è il tuo turno.');
     const player = this.get(playerId)!;
-    const before = this.game.revealed;
-    const changed = kind === 'reveal' ? reveal(this.game, index) : chord(this.game, index);
+    const g = this.game;
+    const first = !g.minesPlaced;
+    const before = g.revealed;
+    const hitsBefore = g.hits;
+    const changed = kind === 'reveal' ? reveal(g, index) : chord(g, index);
     // Una mossa che non cambia nulla (es. click su cella già scoperta) non consuma il turno.
     if (!changed) return;
 
-    player.revealed += this.game.revealed - before;
+    this.award(player, g.revealed - before, first);
     this.lastAction = { type: kind, playerId, index };
 
-    if (isOver(this.game)) this.endGame(player);
-    else this.advanceTurn(this.indexOf(playerId));
+    if (isOver(g)) this.endGame(player);
+    else {
+      if (g.hits > hitsBefore) {
+        const left = livesLeft(g);
+        this.systemMessage(`💥 ${player.name} ha trovato una mina! ${left === 1 ? 'Resta 1 vita' : `Restano ${left} vite`} alla squadra.`);
+      }
+      this.advanceTurn(this.indexOf(playerId));
+    }
     this.broadcastState();
   }
 
-  /** Le bandierine sono condivise: chiunque può metterle in qualsiasi momento, senza consumare il turno. */
+  /**
+   * Punti del campo condiviso. Il primo click apre spesso un'area enorme per pura fortuna:
+   * quelle celle si dividono in parti uguali tra i giocatori connessi (l'eventuale resto a chi ha cliccato).
+   */
+  private award(player: Player, cells: number, first: boolean) {
+    if (!first) {
+      player.score += cells;
+      return;
+    }
+    const sharing = this.players.filter((p) => p.connected);
+    const share = Math.floor(cells / sharing.length);
+    for (const p of sharing) p.score += share;
+    player.score += cells - share * sharing.length;
+    if (sharing.length > 1) this.systemMessage(`Prima apertura: ${cells} celle divise tra tutti (${share} a testa).`);
+  }
+
+  private raceReveal(playerId: string, index: number, kind: 'reveal' | 'chord') {
+    const player = this.get(playerId);
+    const g = player?.game;
+    if (!player || !g) throw new RoomError('BAD_PHASE', 'Stai guardando: entrerai nella prossima sfida.');
+    const hitsBefore = g.hits;
+    const changed = kind === 'reveal' ? reveal(g, index) : chord(g, index);
+    if (!changed) return;
+    player.score = g.revealed - player.baseline;
+
+    if (g.status === 'won') {
+      this.systemMessage(`🌼 ${player.name} ha ripulito il campo!`);
+    } else if (g.status === 'lost') {
+      this.systemMessage(`💀 ${player.name} è stato eliminato con ${player.score} punti`);
+    } else if (g.hits > hitsBefore) {
+      const left = livesLeft(g);
+      this.systemMessage(`💥 ${player.name} ha preso una mina (${left === 1 ? '1 vita rimasta' : `${left} vite rimaste`})`);
+    }
+    this.checkRaceEnd();
+    this.broadcastState();
+  }
+
+  /** Le bandierine non consumano il turno. In coop sono condivise, in sfida ognuno ha le sue. */
   flag(playerId: string, index: number): void {
     this.requirePlaying();
-    if (!this.get(playerId)) throw new RoomError('NOT_IN_ROOM', 'Non sei in questa partita.');
-    if (toggleMark(this.game, index, false)) this.broadcastState();
+    const player = this.get(playerId);
+    if (!player) throw new RoomError('NOT_IN_ROOM', 'Non sei in questa partita.');
+    const g = this.isRace ? player.game : this.game;
+    if (g && toggleMark(g, index, false)) this.broadcastState();
   }
 
   chatFrom(playerId: string, rawText: string): void {
@@ -191,6 +271,16 @@ export class Room {
     const text = rawText.replace(/\s+/g, ' ').trim().slice(0, MAX_CHAT_LENGTH);
     if (!player || !text) return;
     this.pushChat({ playerId, name: player.name, color: player.color, text });
+  }
+
+  /** La sfida finisce quando nessuno sta più giocando (campo pulito, eliminato o disconnesso). */
+  private checkRaceEnd() {
+    if (!this.isRace || this.phase !== 'playing') return;
+    const racing = this.players.some((p) => p.game && p.connected && !isOver(p.game));
+    if (racing) return;
+    this.phase = 'ended';
+    const [winner] = rankPlayers(this.view().players.filter((p) => p.board));
+    this.systemMessage(winner ? `🏆 ${winner.name} vince la sfida con ${winner.score} punti!` : 'Sfida terminata.');
   }
 
   private endGame(by: Player) {
@@ -201,7 +291,7 @@ export class Room {
     if (this.game.status === 'won') {
       this.systemMessage('🌼 Campo ripulito: vittoria di squadra!');
     } else {
-      this.systemMessage(`💥 ${by.name} ha trovato una mina. Partita persa!`);
+      this.systemMessage(`💥 ${by.name} ha trovato l'ultima mina: vite finite, partita persa!`);
     }
   }
 
@@ -223,12 +313,13 @@ export class Room {
 
   private setTurn(playerId: string | null) {
     this.clearTurnTimer();
-    this.turnPlayerId = this.phase === 'playing' ? playerId : null;
+    this.turnPlayerId = this.phase === 'playing' && !this.isRace ? playerId : null;
     this.turnEndsAt = null;
-    if (!this.turnPlayerId || this.turnSeconds <= 0) return;
+    const { turnSeconds } = this.settings;
+    if (!this.turnPlayerId || turnSeconds <= 0) return;
 
     const current = this.turnPlayerId;
-    this.turnEndsAt = Date.now() + this.turnSeconds * 1000;
+    this.turnEndsAt = Date.now() + turnSeconds * 1000;
     this.turnTimer = setTimeout(() => {
       if (this.turnPlayerId !== current || this.phase !== 'playing') return;
       const p = this.get(current);
@@ -236,7 +327,7 @@ export class Room {
       if (p) this.systemMessage(`⏱️ Tempo scaduto per ${p.name}`);
       this.advanceTurn(this.indexOf(current));
       this.broadcastState();
-    }, this.turnSeconds * 1000);
+    }, turnSeconds * 1000);
   }
 
   private clearTurnTimer() {
@@ -297,28 +388,24 @@ export class Room {
   }
 
   view(): RoomView {
-    const g = this.game;
+    // In sfida le mine restano nascoste su tutti i campi finché la gara non è finita.
+    const revealMines = this.phase === 'ended';
     return {
       code: this.code,
       phase: this.phase,
       hostId: this.hostId,
       players: this.players.map((p) => ({
-        id: p.id, name: p.name, color: p.color, connected: p.connected, revealed: p.revealed,
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        connected: p.connected,
+        score: p.score,
+        board: p.game ? boardView(p.game, revealMines) : null,
       })),
       turnPlayerId: this.turnPlayerId,
       turnEndsAt: this.turnEndsAt,
-      turnSeconds: this.turnSeconds,
-      config: this.config,
-      board: {
-        width: g.width,
-        height: g.height,
-        mines: g.mines,
-        status: g.status,
-        view: toView(g),
-        flags: g.flags,
-        startedAt: g.startedAt,
-        endedAt: g.endedAt,
-      },
+      settings: this.settings,
+      board: boardView(this.game, !this.isRace),
       lastAction: this.lastAction,
       round: this.round,
       now: Date.now(),
@@ -345,4 +432,19 @@ export class Room {
     this.clearTurnTimer();
     for (const p of this.players) if (p.removeTimer) clearTimeout(p.removeTimer);
   }
+}
+
+function boardView(g: Game, revealMines: boolean): BoardView {
+  return {
+    width: g.width,
+    height: g.height,
+    mines: g.mines,
+    status: g.status,
+    view: toView(g, revealMines),
+    flags: g.flags,
+    lives: g.lives,
+    hits: g.hits,
+    startedAt: g.startedAt,
+    endedAt: g.endedAt,
+  };
 }

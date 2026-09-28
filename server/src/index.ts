@@ -2,8 +2,8 @@ import http from 'node:http';
 import { randomInt } from 'node:crypto';
 import { WebSocketServer, WebSocket, type RawData } from 'ws';
 import {
-  CODE_ALPHABET, CODE_LENGTH, TURN_OPTIONS,
-  clampConfig, isValidCode, normalizeCode,
+  CODE_ALPHABET, CODE_LENGTH,
+  isValidCode, normalizeCode, normalizeSettings,
   type ClientMessage, type ErrorCode, type ServerMessage,
 } from '@prato/shared';
 import { Room, RoomError, type Player } from './room';
@@ -63,8 +63,6 @@ function generateCode(): string {
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 const str = (v: unknown, max = 200) => (typeof v === 'string' ? v.slice(0, max) : '');
 const int = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) ? v : -1);
-const turnSecondsOf = (v: unknown) =>
-  (TURN_OPTIONS as readonly number[]).includes(v as number) ? (v as number) : 0;
 
 function parse(data: RawData): ClientMessage | null {
   let msg: unknown;
@@ -76,12 +74,7 @@ function parse(data: RawData): ClientMessage | null {
   if (!isObj(msg) || typeof msg.t !== 'string') return null;
   switch (msg.t) {
     case 'create':
-      return {
-        t: 'create',
-        name: str(msg.name, 40),
-        config: clampConfig(isObj(msg.config) ? msg.config : null),
-        turnSeconds: turnSecondsOf(msg.turnSeconds),
-      };
+      return { t: 'create', name: str(msg.name, 40), settings: normalizeSettings(msg.settings) };
     case 'join':
       return { t: 'join', code: normalizeCode(str(msg.code, 20)), name: str(msg.name, 40) };
     case 'resume':
@@ -90,11 +83,7 @@ function parse(data: RawData): ClientMessage | null {
         playerId: str(msg.playerId, 64), token: str(msg.token, 64),
       };
     case 'configure':
-      return {
-        t: 'configure',
-        config: clampConfig(isObj(msg.config) ? msg.config : null),
-        turnSeconds: turnSecondsOf(msg.turnSeconds),
-      };
+      return { t: 'configure', settings: normalizeSettings(msg.settings) };
     case 'reveal':
     case 'chord':
     case 'flag':
@@ -153,7 +142,7 @@ function handle(c: Conn, msg: ClientMessage) {
   switch (msg.t) {
     case 'create': {
       leaveCurrent(c);
-      const room = new Room(generateCode(), msg.config, msg.turnSeconds, hooks);
+      const room = new Room(generateCode(), msg.settings, hooks);
       rooms.set(room.code, room);
       log(`stanza ${room.code} creata (${rooms.size} attive)`);
       enterRoom(c, room, room.addPlayer(msg.name, c.ws));
@@ -187,7 +176,7 @@ function handle(c: Conn, msg: ClientMessage) {
       send(c.ws, { t: 'left' });
       return;
     case 'configure':
-      return room.configure(player.id, msg.config, msg.turnSeconds);
+      return room.configure(player.id, msg.settings);
     case 'start':
       return room.start(player.id);
     case 'reveal':

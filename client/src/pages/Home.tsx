@@ -19,7 +19,7 @@ export function Home() {
         <Link to="/multi" className="card mode-card">
           <span className="mode-emoji">👥</span>
           <h2>Gioca con gli amici</h2>
-          <p>Crea una partita, condividi il codice e giocate in cooperativa a turni, in tempo reale.</p>
+          <p>Crea una partita e condividi il codice: cooperativa a turni o sfida con un campo a testa.</p>
         </Link>
       </div>
 
@@ -48,8 +48,12 @@ export function Home() {
             </ul>
           </div>
           <div>
-            <h3>Multiplayer cooperativo</h3>
-            <p>Stesso campo per tutti. A turno ognuno scopre una cella; le bandierine sono libere. Una mina fa perdere la squadra, un campo pulito la fa vincere. Se chi è di turno si disconnette o finisce il tempo, il turno passa al successivo.</p>
+            <h3>Multiplayer: Cooperativa</h3>
+            <p>Un solo campo, a turni; le bandierine sono libere. L'host sceglie da 1 a 5 vite di squadra: ogni mina ne costa una. Le celle del primo click si dividono tra tutti, poi ogni cella vale 1 punto a chi la apre.</p>
+          </div>
+          <div>
+            <h3>Multiplayer: Sfida</h3>
+            <p>Ognuno ha il suo campo con le stesse mine e la stessa apertura iniziale, e si gioca tutti insieme. Da 1 a 5 vite a testa, finite le vite sei eliminato. Vedi i campi degli avversari in tempo reale; vince chi fa più punti.</p>
           </div>
         </div>
       </section>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { clampConfig, maxMines } from './config';
 import {
-  Cell, View, chord, createGame, neighbors, placeMines, reveal, toggleMark, toView, type Game,
+  Cell, View, chord, cloneLayout, createGame, neighbors, placeMines, reveal, toggleMark, toView, type Game,
 } from './engine';
 
 function seeded(seed: number) {
@@ -146,5 +146,62 @@ describe('chord', () => {
     expect(chord(g, 4, 10)).toBe(true);
     expect(g.status).toBe('lost');
     expect(g.exploded).toBe(0);
+  });
+});
+
+describe('vite', () => {
+  it('una mina con vite extra non fa perdere e conta come mina nota', () => {
+    const g = fixed(3, 3, [0, 8]);
+    g.lives = 2;
+    reveal(g, 4, 0);
+    reveal(g, 0, 10);
+    expect(g.status).toBe('playing');
+    expect(g.hits).toBe(1);
+    expect(toView(g)[0]).toBe(View.EXPLODED);
+    // chord sul centro (2): mina esplosa + bandierina = 2 → scopre il resto
+    toggleMark(g, 8);
+    expect(chord(g, 4, 20)).toBe(true);
+    expect(g.status).toBe('won');
+    expect(g.flags).toBe(1);
+  });
+
+  it('esaurite le vite si perde', () => {
+    const g = fixed(3, 3, [0, 8]);
+    g.lives = 2;
+    reveal(g, 0, 0);
+    reveal(g, 8, 5);
+    expect(g.status).toBe('lost');
+  });
+
+  it('chord che colpisce più mine consuma più vite', () => {
+    const g = fixed(3, 3, [0, 2]);
+    g.lives = 3;
+    reveal(g, 4, 0); // 2
+    toggleMark(g, 6); toggleMark(g, 8); // bandiere sbagliate
+    chord(g, 4, 1);
+    expect(g.hits).toBe(2);
+    expect(g.status).toBe('playing');
+  });
+});
+
+describe('sfida', () => {
+  it('cloneLayout copia le mine ma non lo stato', () => {
+    const master = createGame({ width: 9, height: 9, mines: 10 });
+    placeMines(master, 40, seeded(3));
+    const a = cloneLayout(master, 3);
+    const b = cloneLayout(master, 3);
+    reveal(a, 40, 0);
+    expect(Array.from(a.mine)).toEqual(Array.from(master.mine));
+    expect(b.revealed).toBe(0);
+    expect(a.lives).toBe(3);
+    expect(a.revealed).toBeGreaterThan(1); // apertura
+  });
+
+  it('toView con revealMines=false non espone le mine di un campo perso', () => {
+    const g = fixed(3, 3, [0, 8]);
+    reveal(g, 0, 0);
+    expect(g.status).toBe('lost');
+    expect(toView(g, false)[8]).toBe(View.HIDDEN);
+    expect(toView(g, true)[8]).toBe(View.MINE);
   });
 });
