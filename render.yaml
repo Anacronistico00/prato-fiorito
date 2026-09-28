@@ -1,0 +1,15 @@
+# Blueprint Render per il server WebSocket (Dashboard → New → Blueprint → scegli il repo)
+services:
+  - type: web
+    name: prato-fiorito-server
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build:server
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Origini autorizzate a collegarsi (il tuo dominio Vercel). Supporta * per le preview.
+      - key: ALLOWED_ORIGINS
+        value: https://prato-fiorito.vercel.app,https://*.vercel.app,http://localhost:5173
